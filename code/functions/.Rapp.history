@@ -1,0 +1,1293 @@
+D_nu <- duplication.matrix(K + 2)
+eta_vec$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*cprod(D_nu, as.vector(diag(K + 2))))
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*cprod(D_nu, as.vector(diag(K + 2))))
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = TRUE#
+)
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]
+eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"
+# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)#
+	gauss_lik_fragment <- logistic_lik_frag(eta_in, y, C)
+names(gauss_lik_fragment)
+names(gauss_lik_fragment$eta)
+eta$"p(y|beta,u)->(beta,u)" <- gauss_lik_fragment$"eta"[[1]]
+# Update p(beta,u|sigsq_u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->(beta,u)",#
+		eta$"sigsq_u->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	G_in <- list(#
+		G$"sigsq_u->p(beta,u|sigsq_u)",#
+		G$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	gauss_pen_fragment <- gauss_pen_frag(#
+		eta_in, G_in, sigsq_beta#
+	)#
+	eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_pen_fragment$"eta"[[1]]#
+	eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"eta"[[2]]#
+	G$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"G"[[1]]
+# Update p(sigsq_u|a_u) fragment:#
+	eta_in <- list(#
+		eta$"sigsq_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->sigsq_u",#
+		eta$"a_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->a_u"#
+	)#
+	iter_igw_fragment <- iter_igw_frag(#
+		eta_in, G$"a_u->p(sigsq_u|a_u)",#
+		1, G$"sigsq_u->p(sigsq_u|a_u)"#
+	)#
+	eta$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"eta"[[1]]#
+	eta$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"eta"[[2]]#
+	G$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"G"[[1]]#
+	G$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"G"[[2]]
+# Set hyperparameters:#
+#
+sigsq_beta <- 1e10#
+A <- 1e5#
+#
+# VMP algorithm:#
+#
+eta <- vector("list", length = 12)#
+names(eta) <- c(#
+	"(beta,u)->p(y|beta,u)", "p(y|beta,u)->(beta,u)",#
+	"(beta,u)->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->(beta,u)",#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+G <- vector("list", length = 8)#
+names(G) <- c(#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*cprod(D_nu, as.vector(diag(K + 2))))#
+#
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = TRUE#
+)#
+#
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"#
+#
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]#
+#
+for(iter in 1:n_vmp) {#
+	print(iter)#
+	eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"#
+	# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)#
+	gauss_lik_fragment <- logistic_lik_frag(eta_in, y, C)#
+	eta$"p(y|beta,u)->(beta,u)" <- gauss_lik_fragment$"eta"[[1]]#
+	# Update p(beta,u|sigsq_u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->(beta,u)",#
+		eta$"sigsq_u->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	G_in <- list(#
+		G$"sigsq_u->p(beta,u|sigsq_u)",#
+		G$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	gauss_pen_fragment <- gauss_pen_frag(#
+		eta_in, G_in, sigsq_beta#
+	)#
+	eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_pen_fragment$"eta"[[1]]#
+	eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"eta"[[2]]#
+	G$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"G"[[1]]#
+	# Update p(sigsq_u|a_u) fragment:#
+	eta_in <- list(#
+		eta$"sigsq_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->sigsq_u",#
+		eta$"a_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->a_u"#
+	)#
+	iter_igw_fragment <- iter_igw_frag(#
+		eta_in, G$"a_u->p(sigsq_u|a_u)",#
+		1, G$"sigsq_u->p(sigsq_u|a_u)"#
+	)#
+	eta$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"eta"[[1]]#
+	eta$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"eta"[[2]]#
+	G$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"G"[[1]]#
+	G$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"G"[[2]]#
+}
+beta,u
+eta_nu <- list(eta$"p(y|beta,u)->(beta,u)", eta$"p(beta,u)->(beta,u)")
+q_nu <- gauss_q(eta_nu, use_vech = TRUE)
+eta_nu[[1]]
+eta_nu[[2]]
+eta_nu <- list(eta$"p(y|beta,u)->(beta,u)", eta$"p(beta,u|sigsq_u)->(beta,u)")
+q_nu <- gauss_q(eta_nu, use_vech = TRUE)
+E_q_nu <- q_nu[[1]]
+Cov_q_nu <- q_nu[[2]]
+E_q_nu
+f_hat <- C_g %*% E_q_nu
+f_hat <- as.vector(C_g %*% E_q_nu)
+sd_vec <- diag(tcrossprod(C_g %*% Cov_q_nu, C_g))
+f_hat <- as.vector(C_g %*% E_q_nu)
+f_low <- f_hat + qnorm(0.025)*sd_vec
+f_upp <- f_hat + qnorm(0.975)*sd_vec
+eta_nu <- list(eta$"p(y|beta,u)->(beta,u)", eta$"p(beta,u|sigsq_u)->(beta,u)")#
+q_nu <- gauss_q(eta_nu, use_vech = TRUE)#
+E_q_nu <- q_nu[[1]]#
+Cov_q_nu <- q_nu[[2]]#
+#
+# Plot the fits:#
+#
+sd_vec <- diag(tcrossprod(C_g %*% Cov_q_nu, C_g))#
+#
+f_hat <- as.vector(C_g %*% E_q_nu)#
+f_low <- f_hat + qnorm(0.025)*sd_vec#
+f_upp <- f_hat + qnorm(0.975)*sd_vec#
+#
+plot(x, y, pch = 16, cex = 0.4, col = "black")#
+lines(x_g, f_g, col = "blue")#
+lines(x_g, f_hat, col = "red")#
+lines(x_g, f_low, col = "red", lty = 2)#
+lines(x_g, f_upp, col = "red", lty = 2)
+source("logistic_regn_vmp.R")
+lapply(eta, length)
+sapply(eta, length)
+sapply(eta, length) == 0
+any(sapply(eta, length) == 0)
+logistic_lik_fragment
+mu_g <- as.vector(C_g %*% E_q_nu)#
+sd_vec <- diag(tcrossprod(C_g %*% Cov_q_nu, C_g))#
+mu_low <- f_hat + qnorm(0.025)*sd_vec#
+mu_upp <- f_hat + qnorm(0.975)*sd_vec
+f_hat <- 1/(1 + exp(-mu_g))
+plot(x, y, pch = 16, cex = 0.4, col = "black")
+lines(x_g, f_g, col = "blue")
+lines(x_g, f_hat, col = "red")
+f_hat <- 1/(1 + exp(-mu_g))#
+f_low <- 1/(1 + exp(-mu_low))#
+f_upp <- 1/(1 + exp(-mu_upp))
+plot(x, y, pch = 16, cex = 0.4, col = "black")#
+lines(x_g, f_g, col = "blue")#
+lines(x_g, f_hat, col = "red")#
+lines(x_g, f_low, col = "red", lty = 2)#
+lines(x_g, f_upp, col = "red", lty = 2)
+source("logistic_regn_vmp.R")
+mu_g <- as.vector(C_g %*% E_q_nu)#
+sd_vec <- diag(tcrossprod(C_g %*% Cov_q_nu, C_g))#
+mu_low <- mu_g + qnorm(0.025)*sd_vec#
+mu_upp <- mu_g + qnorm(0.975)*sd_vec
+f_hat <- 1/(1 + exp(-mu_g))#
+f_low <- 1/(1 + exp(-mu_low))#
+f_upp <- 1/(1 + exp(-mu_upp))#
+#
+plot(x, y, pch = 16, cex = 0.4, col = "black")#
+lines(x_g, f_g, col = "blue")#
+lines(x_g, f_hat, col = "red")#
+lines(x_g, f_low, col = "red", lty = 2)#
+lines(x_g, f_upp, col = "red", lty = 2)
+source("logistic_vmp_regn.R")
+source("logistic_regn_vmp.R")
+D_nu
+source("logistic_regn_vmp.R")
+source("lin_regn_vmp.R")
+source("semi_par_regn_vmp.R")
+library(MASS)#
+library(magic)#
+library(lattice)#
+library(pracma)#
+library(ellipse)#
+#
+# Required functions:#
+#
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")#
+#
+# Settings:#
+#
+n <- 100#
+n_vmp <- 100#
+n_g <- 1000#
+#
+beta <- c(0.5, 3.18)#
+#
+x <- runif(n)#
+prob_vec <- 1/(1 + exp(-x))#
+y <- rbinom(n, 1, prob_vec)
+y
+X <- X_design(x)
+x_g <- seq(0, 1, length = n_g)
+X_g <- X_design(x_g)
+plot(x, y, pch = 16, cex = 0.4, col = "black")
+y_g <- as.vector(X_g %*% beta)
+lines(x_g, y_g, col = "blue")
+d <- length(beta)
+eta <- vector("list", length = 4)#
+names(eta) <- c(#
+	"beta->p(y|beta)", "p(y|beta)->beta",#
+	"beta->p(beta)", "p(beta)->beta"#
+)
+eta$"p(y|beta)->beta" <- c(rep(0, d), -0.5*as.vector(diag(K + 2)))
+eta$"p(y|beta)->beta" <- c(rep(0, d), -0.5*as.vector(diag(d)))
+eta$"p(beta)->beta" <- gauss_prior_frag(#
+	rep(0, d), sigsq_beta*diag(d), use_vech = FALSE#
+)
+sigsq_beta <- 1e10
+eta$"p(beta)->beta" <- gauss_prior_frag(#
+	rep(0, d), sigsq_beta*diag(d), use_vech = FALSE#
+)
+eta$"beta->p(y|beta)" <- eta$"p(beta)->beta"#
+	eta$"beta->p(beta)" <- eta$"p(y|beta)->beta"
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C)#
+	eta$"p(y|beta)->beta" <- logistic_lik_fragment$"eta"[[1]]
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)#
+	eta$"p(y|beta)->beta" <- logistic_lik_fragment$"eta"[[1]]
+eta_in
+y
+X
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)
+logistic_lik_fragment <- logistic_lik_frag(eta_in, y, X, use_vech = FALSE)
+eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, X, use_vech = FALSE)#
+	eta$"p(y|beta)->beta" <- logistic_lik_fragment$"eta"[[1]]
+eta$"p(y|beta)->beta"
+# Set hyperparameters:#
+#
+sigsq_beta <- 1e10#
+#
+# VMP algorithm:#
+#
+eta <- vector("list", length = 4)#
+names(eta) <- c(#
+	"beta->p(y|beta)", "p(y|beta)->beta",#
+	"beta->p(beta)", "p(beta)->beta"#
+)#
+#
+eta$"p(y|beta)->beta" <- c(rep(0, d), -0.5*as.vector(diag(d)))#
+#
+eta$"p(beta)->beta" <- gauss_prior_frag(#
+	rep(0, d), sigsq_beta*diag(d), use_vech = FALSE#
+)#
+#
+for(iter in 1:n_vmp) {#
+	print(iter)#
+	eta$"beta->p(y|beta)" <- eta$"p(beta)->beta"#
+	eta$"beta->p(beta)" <- eta$"p(y|beta)->beta"#
+	# Update p(y|beta) fragment:#
+	eta_in <- list(#
+		eta$"beta->p(y|beta)",#
+		eta$"p(y|beta)->beta"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, X, use_vech = FALSE)#
+	eta$"p(y|beta)->beta" <- logistic_lik_fragment$"eta"[[1]]#
+}
+eta_nu <- list(eta$"p(y|beta)->beta", eta$"p(beta)->beta")
+q_nu <- gauss_q(eta_nu, use_vech = FALSE)
+E_q_nu <- q_nu[[1]]
+Cov_q_nu <- q_nu[[2]]
+E_q_nu
+beta
+source("logistic_regn_vmp.R")
+E_q_nu
+beta\
+beta
+Cov_q_beta
+source("logistic_regn_vmp.R")
+E_q_beta
+beta
+Cov_q_beta
+plot(x, y, pch = 16, cex = 0.4)
+lines(x_g, y_g, col = "red")
+y_g
+y_g <- 1/(1 + exp(as.vector(X_g %*% beta)))
+y_g
+x_g <- seq(0, 1, length = n_g)#
+X_g <- X_design(x_g)#
+y_g <- 1/(1 + exp(as.vector(X_g %*% beta)))#
+#
+plot(x, y, pch = 16, cex = 0.4)#
+lines(x_g, y_g, col = "red")
+y_hat <- 1/(1 + exp(-X_g %*% E_q_beta))
+lines(x_g, y_hat, col = "blue")
+y_hat <- 1/(1 + exp(as.vector(X_g %*% E_q_beta)))
+lines(x_g, y_hat, col = "blue")
+x_g <- seq(0, 1, length = n_g)#
+X_g <- X_design(x_g)#
+y_g <- 1/(1 + exp(as.vector(-X_g %*% beta)))#
+#
+plot(x, y, pch = 16, cex = 0.4)#
+lines(x_g, y_g, col = "red")
+y_hat <- 1/(1 + exp(as.vector(X_g %*% E_q_beta)))
+lines(x_g, y_hat, col = "blue")
+x_g <- seq(0, 1, length = n_g)#
+X_g <- X_design(x_g)#
+y_g <- 1/(1 + exp(as.vector(-X_g %*% beta)))#
+#
+plot(x, y, pch = 16, cex = 0.4)#
+lines(x_g, y_g, col = "red")
+lines(x_g, y_hat, col = "blue")
+x_g <- seq(0, 1, length = n_g)#
+X_g <- X_design(x_g)#
+y_g <- 1/(1 + exp(as.vector(-X_g %*% beta)))#
+#
+plot(x, y, pch = 16, cex = 0.4)#
+lines(x_g, y_g, col = "red")
+# Save the original q_beta:#
+#
+eta_beta <- list(eta$"p(y|beta)->beta", eta$"p(beta)->beta")#
+q_beta <- gauss_q(eta_beta, use_vech = FALSE)#
+E_q_beta <- q_beta[[1]]#
+Cov_q_beta <- q_beta[[2]]#
+#
+# Plot the VMP estimates:#
+#
+y_hat <- 1/(1 + exp(as.vector(-X_g %*% E_q_beta)))#
+lines(x_g, y_hat, col = "blue")
+alpha_hat <- X_g %*% E_q_beta
+sd_vec <- diag(tcrossprod(X_g %*% Cov_q_beta, X_g))
+sd_vec
+sd_vec <- diag(tcrossprod(X_g %*% Cov_q_beta, X_g))#
+#
+alpha_hat <- X_g %*% E_q_beta#
+alpha_low <- alpha_hat + qnorm(0.025)*sd_vec#
+alpha_upp <- alpha_hat + qnorm(0.975)*sd_vec
+sd_vec <- diag(tcrossprod(X_g %*% Cov_q_beta, X_g))#
+#
+alpha_hat <- X_g %*% E_q_beta#
+alpha_low <- alpha_hat + qnorm(0.025)*sd_vec#
+alpha_upp <- alpha_hat + qnorm(0.975)*sd_vec#
+#
+y_hat <- 1/(1 + exp(as.vector(-alpha_hat)))#
+y_low <- 1/(1 + exp(as.vector(-alpha_low)))#
+y_upp <- 1/(1 + exp(as.vector(-alpha_upp)))
+lines(x_g, y_hat, col = "blue")
+lines(x_g, y_lopw, col = "blue", lty = 2)
+lines(x_g, y_low, col = "blue", lty = 2)
+lines(x_g, y_upp, col = "blue", lty = 2)
+source("logistic_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+traceback()
+library(MASS)#
+library(magic)#
+library(lattice)#
+library(pracma)#
+library(ellipse)#
+#
+# Required functions:#
+#
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")#
+#
+# Settings:#
+#
+n <- 100#
+n_vmp <- 100#
+n_int_knots <- 20#
+K <- n_int_knots + 2#
+D_nu <- duplication.matrix(K + 2)#
+n_g <- 1000#
+#
+f <- function(x) {#
+	ans <- 0.45*sin(2*pi*x^2) + 0.5#
+	return(ans)#
+}#
+#
+x <- runif(n)#
+prob_vec <- f(x)#
+y <- rbinom(n, 1, prob_vec)#
+#
+print_pdf <- FALSE#
+plot_width <- 6#
+plot_height <- 6#
+#
+# Set up design matrices:#
+#
+a <- 1.01*min(x) - 0.01*max(x)#
+b <- 1.01*max(x) - 0.01*min(x)#
+int_knots <- quantile(unique(x), seq(0, 1, length= K)[-c(1, K)])#
+X <- X_design(x)#
+Z <- ZOSull(x, range.x = c(a, b), intKnots = int_knots)#
+C <- cbind(X,Z)#
+#
+# Set plotting grid and matrices:#
+#
+x_g <- seq(a, b, length = n_g)#
+f_g <- f(x_g)#
+X_g <- X_design(x_g)#
+Z_g <- ZOSull(x_g, range.x = c(a, b), intKnots = int_knots)#
+C_g <- cbind(X_g, Z_g)
+plot(x, y, pch = 16, cex = 0.4, col = "black")
+lines(x_g, f_g, col = "blue")
+# Set hyperparameters:#
+#
+sigsq_beta <- 1e10#
+A <- 1e5#
+#
+# VMP algorithm:#
+#
+eta <- vector("list", length = 12)#
+names(eta) <- c(#
+	"(beta,u)->p(y|beta,u)", "p(y|beta,u)->(beta,u)",#
+	"(beta,u)->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->(beta,u)",#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+G <- vector("list", length = 8)#
+names(G) <- c(#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*cprod(D_nu, as.vector(diag(K + 2))))#
+#
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = TRUE#
+)#
+#
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"#
+#
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]
+eta$"p(y|beta,u)->(beta,u)"
+eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"
+# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)
+eta_in
+A
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+#
+setwd("..")
+logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C)
+eta$"p(y|beta,u)->(beta,u)" <- logistic_lik_fragment$"eta"[[1]]
+source("logistic_sp_regn_vmp.R")
+eta <- vector("list", length = 12)#
+names(eta) <- c(#
+	"(beta,u)->p(y|beta,u)", "p(y|beta,u)->(beta,u)",#
+	"(beta,u)->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->(beta,u)",#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+G <- vector("list", length = 8)#
+names(G) <- c(#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*as.vector(diag(K + 2)))#
+#
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = FALSE#
+)
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"#
+#
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]
+eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"
+# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)#
+	eta$"p(y|beta,u)->(beta,u)" <- logistic_lik_fragment$"eta"[[1]]
+# Update p(beta,u|sigsq_u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->(beta,u)",#
+		eta$"sigsq_u->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	G_in <- list(#
+		G$"sigsq_u->p(beta,u|sigsq_u)",#
+		G$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	gauss_pen_fragment <- gauss_pen_frag(#
+		eta_in, G_in, sigsq_beta#
+	)#
+	eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_pen_fragment$"eta"[[1]]#
+	eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"eta"[[2]]#
+	G$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"G"[[1]]#
+	# Update p(sigsq_u|a_u) fragment:#
+	eta_in <- list(#
+		eta$"sigsq_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->sigsq_u",#
+		eta$"a_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->a_u"#
+	)#
+	iter_igw_fragment <- iter_igw_frag(#
+		eta_in, G$"a_u->p(sigsq_u|a_u)",#
+		1, G$"sigsq_u->p(sigsq_u|a_u)"#
+	)#
+	eta$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"eta"[[1]]#
+	eta$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"eta"[[2]]#
+	G$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"G"[[1]]#
+	G$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"G"[[2]]
+eta <- vector("list", length = 12)#
+names(eta) <- c(#
+	"(beta,u)->p(y|beta,u)", "p(y|beta,u)->(beta,u)",#
+	"(beta,u)->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->(beta,u)",#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+G <- vector("list", length = 8)#
+names(G) <- c(#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*as.vector(diag(K + 2)))#
+#
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = FALSE#
+)#
+#
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"#
+#
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]#
+#
+for(iter in 1:n_vmp) {#
+	print(iter)#
+	eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"#
+	# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)#
+	eta$"p(y|beta,u)->(beta,u)" <- logistic_lik_fragment$"eta"[[1]]#
+	# Update p(beta,u|sigsq_u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->(beta,u)",#
+		eta$"sigsq_u->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	G_in <- list(#
+		G$"sigsq_u->p(beta,u|sigsq_u)",#
+		G$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	gauss_pen_fragment <- gauss_pen_frag(#
+		eta_in, G_in, sigsq_beta, use_vech = FALSE#
+	)#
+	eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_pen_fragment$"eta"[[1]]#
+	eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"eta"[[2]]#
+	G$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"G"[[1]]#
+	# Update p(sigsq_u|a_u) fragment:#
+	eta_in <- list(#
+		eta$"sigsq_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->sigsq_u",#
+		eta$"a_u->p(sigsq_u|a_u)",#
+		eta$"p(sigsq_u|a_u)->a_u"#
+	)#
+	iter_igw_fragment <- iter_igw_frag(#
+		eta_in, G$"a_u->p(sigsq_u|a_u)",#
+		1, G$"sigsq_u->p(sigsq_u|a_u)"#
+	)#
+	eta$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"eta"[[1]]#
+	eta$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"eta"[[2]]#
+	G$"p(sigsq_u|a_u)->sigsq_u" <- iter_igw_fragment$"G"[[1]]#
+	G$"p(sigsq_u|a_u)->a_u" <- iter_igw_fragment$"G"[[2]]#
+}
+# Save the original q_beta,u:#
+#
+eta_nu <- list(eta$"p(y|beta,u)->(beta,u)", eta$"p(beta,u|sigsq_u)->(beta,u)")#
+q_nu <- gauss_q(eta_nu, use_vech = FALSE)#
+E_q_nu <- q_nu[[1]]#
+Cov_q_nu <- q_nu[[2]]
+# Plot the fits:#
+#
+mu_g <- as.vector(C_g %*% E_q_nu)#
+sd_vec <- diag(tcrossprod(C_g %*% Cov_q_nu, C_g))#
+mu_low <- mu_g + qnorm(0.025)*sd_vec#
+mu_upp <- mu_g + qnorm(0.975)*sd_vec
+f_hat <- 1/(1 + exp(-mu_g))#
+f_low <- 1/(1 + exp(-mu_low))#
+f_upp <- 1/(1 + exp(-mu_upp))
+plot(x, y, pch = 16, cex = 0.4, col = "black")#
+lines(x_g, f_g, col = "blue")#
+lines(x_g, f_hat, col = "red")#
+lines(x_g, f_low, col = "red", lty = 2)#
+lines(x_g, f_upp, col = "red", lty = 2)
+source("logistic_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_regn_vmp.R")
+density
+dens
+j <- 1
+x_min <- E_q_beta[j] - 3*sqrt(Cov_q_beta[j, j])#
+	x_max <- E_q_beta[j] + 3*sqrt(Cov_q_beta[j, j])#
+	dens_x <- seq(x_min, x_max, n_g)#
+	dens_y <- dnorm(dens_x, E_q_beta[j], sqrt(Cov_q_beta[j, j]))#
+	plot(dens_x, dens_y, type = "l", col = "red")#
+	abline(v = beta[j])
+dens_x
+x_min
+x_max
+dens_x
+dens_x <- seq(x_min, x_max, length = n_g)
+dens_x
+x_min <- E_q_beta[j] - 3*sqrt(Cov_q_beta[j, j])#
+	x_max <- E_q_beta[j] + 3*sqrt(Cov_q_beta[j, j])#
+	dens_x <- seq(x_min, x_max, length = n_g)#
+	dens_y <- dnorm(dens_x, E_q_beta[j], sqrt(Cov_q_beta[j, j]))#
+	plot(dens_x, dens_y, type = "l", col = "red")#
+	abline(v = beta[j])
+source("logistic_regn_vmp.R")
+source("lin_regn_vmp.R")
+source("tmp.R")
+source("semi_par_regn_vmp.R")
+source("tmp.R")
+source("semi_par_regn_vmp.R")
+source("tmp.R")
+Cov_q_nu
+source("tmp.R")
+source("semi_par_regn_vmp.R")
+source("tmp.R")
+source("semi_par_regn_vmp.R")
+source("tmp.R")
+source("semi_par_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")s
+source("logistic_sp_regn_vmp.R")
+sigsq_beta
+library(MASS)#
+library(magic)#
+library(lattice)#
+library(pracma)#
+library(ellipse)#
+#
+# Required functions:#
+#
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+source("updateGaussPenFrag.r")#
+#
+setwd("..")#
+#
+set.seed(6)#
+#
+# Settings:#
+#
+n <- 200#
+n_vmp <- 1000#
+n_int_knots <- 23#
+K <- n_int_knots + 2#
+D_nu <- duplication.matrix(K + 2)#
+n_g <- 1000#
+#
+f <- function(x) {#
+	ans <- (1.05 - 1.02*x + 0.018*x^2 + 0.4*dnorm(x, 0.38, 0.08) + 0.08*dnorm(x, 0.75, 0.03))/2.7#
+	return(ans)#
+}#
+#
+x <- runif(n)#
+prob_vec <- f(x)#
+y <- rbinom(n, 1, prob_vec)#
+#
+print_pdf <- FALSE#
+plot_width <- 6#
+plot_height <- 6#
+#
+# Set up design matrices:#
+#
+a <- 1.01*min(x) - 0.01*max(x)#
+b <- 1.01*max(x) - 0.01*min(x)#
+int_knots <- quantile(unique(x), seq(a, b, length= K)[-c(1, K)])#
+X <- X_design(x)#
+Z <- ZOSull(x, range.x = c(a, b), intKnots = int_knots)#
+C <- cbind(X,Z)#
+#
+# Set plotting grid and matrices:#
+#
+x_g <- seq(a, b, length = n_g)#
+f_g <- f(x_g)#
+X_g <- X_design(x_g)#
+Z_g <- ZOSull(x_g, range.x = c(a, b), intKnots = int_knots)#
+C_g <- cbind(X_g, Z_g)#
+#
+# Plot the data#
+#
+if(print_pdf) {#
+	pdf("./../images/bin_resp_data.pdf", width=plot_width, height=plot_height)#
+}#
+#
+plot(x, y, pch = 16, cex = 0.4, col = "black")#
+lines(x_g, f_g, col = "blue")#
+#
+if(print_pdf) {#
+	dev.off()#
+}
+# Set hyperparameters:#
+#
+sigsq_beta <- 1e10#
+A <- 1e5#
+#
+# VMP algorithm:#
+#
+eta <- vector("list", length = 12)#
+names(eta) <- c(#
+	"(beta,u)->p(y|beta,u)", "p(y|beta,u)->(beta,u)",#
+	"(beta,u)->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->(beta,u)",#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+G <- vector("list", length = 8)#
+names(G) <- c(#
+	"sigsq_u->p(beta,u|sigsq_u)", "p(beta,u|sigsq_u)->sigsq_u",#
+	"sigsq_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->sigsq_u",#
+	"a_u->p(sigsq_u|a_u)", "p(sigsq_u|a_u)->a_u",#
+	"a_u->p(a_u)", "p(a_u)->a_u"#
+)#
+#
+eta$"p(y|beta,u)->(beta,u)" <- c(rep(0, K + 2), -0.5*as.vector(diag(K + 2)))#
+#
+eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_prior_frag(#
+	rep(0, K + 2), diag(c(rep(sigsq_beta, 2), rep(1, K))), use_vech = FALSE#
+)#
+#
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- c(-K/2, -K/2)#
+G$"p(beta,u|sigsq_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->sigsq_u" <- c(-3/2, -1/2)#
+G$"p(sigsq_u|a_u)->sigsq_u" <- "full"#
+#
+eta$"p(sigsq_u|a_u)->a_u" <- c(-1/2, -1/2)#
+G$"p(sigsq_u|a_u)->a_u" <- "diag"#
+#
+igw_prior_updates <- igw_prior_frag(list("diag", 1, 1/A^2))#
+#
+eta$"p(a_u)->a_u" <- igw_prior_updates[[2]]#
+G$"p(a_u)->a_u" <- igw_prior_updates[[1]]
+eta$"(beta,u)->p(y|beta,u)" <- eta$"p(beta,u|sigsq_u)->(beta,u)"#
+	eta$"(beta,u)->p(beta,u|sigsq_u)" <- eta$"p(y|beta,u)->(beta,u)"#
+	eta$"sigsq_u->p(beta,u|sigsq_u)" <- eta$"p(sigsq_u|a_u)->sigsq_u"#
+	G$"sigsq_u->p(beta,u|sigsq_u)" <- G$"p(sigsq_u|a_u)->sigsq_u"#
+	eta$"sigsq_u->p(sigsq_u|a_u)" <- eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	G$"sigsq_u->p(sigsq_u|a_u)" <- G$"p(beta,u|sigsq_u)->sigsq_u"#
+	eta$"a_u->p(sigsq_u|a_u)" <- eta$"p(a_u)->a_u"#
+	G$"a_u->p(sigsq_u|a_u)" <- G$"p(a_u)->a_u"#
+	eta$"a_u->p(a_u)" <- eta$"p(sigsq_u|a_u)->a_u"#
+	G$"a_u->p(a_u)" <- G$"p(sigsq_u|a_u)->a_u"#
+	# Update p(y|beta,u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(y|beta,u)",#
+		eta$"p(y|beta,u)->(beta,u)"#
+	)#
+	logistic_lik_fragment <- logistic_lik_frag(eta_in, y, C, use_vech = FALSE)#
+	eta$"p(y|beta,u)->(beta,u)" <- logistic_lik_fragment$"eta"[[1]]#
+	# Update p(beta,u|sigsq_u) fragment:#
+	eta_in <- list(#
+		eta$"(beta,u)->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->(beta,u)",#
+		eta$"sigsq_u->p(beta,u|sigsq_u)",#
+		eta$"p(beta,u|sigsq_u)->sigsq_u"#
+	)#
+	G_in <- list(#
+		G$"sigsq_u->p(beta,u|sigsq_u)",#
+		G$"p(beta,u|sigsq_u)->sigsq_u"#
+	)
+# gauss_pen_fragment <- gauss_pen_frag(#
+		# eta_in, G_in, sigsq_beta, use_vech = FALSE#
+	# )#
+	# eta$"p(beta,u|sigsq_u)->(beta,u)" <- gauss_pen_fragment$"eta"[[1]]#
+	# eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"eta"[[2]]#
+	# G$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment$"G"[[1]]#
+	gauss_pen_fragment <- updateGaussPenFrag(mutheta=rep(0,2),Sigmatheta=sigsq_beta*diag(2),#
+                                   dtheta= K + 2, etaIN = eta_in)
+mutheta <- rep(0,2)
+Sigmatheta <- sigsq_beta*diag(2)
+dtheta <- K + 2
+etaIN <- eta_in
+L <- 0.5*length(etaIN) - 1
+L
+etaSUM <- vector("list",(2*L))
+etaOUT <- vector("list",(L+1))
+dTheta <- rep(NA,L)#
+#
+   if (is.null(mutheta)|is.null(Sigmatheta))#
+      dtheta0 <- 0#
+#
+   if ((!is.null(mutheta))&(!is.null(Sigmatheta)))#
+     dtheta0 <- length(mutheta)#
+#
+   for (ell in 1:L)#
+      dTheta[ell] <- sqrt(length(etaIN[[2*ell+1]][-1]))#
+#
+   if (any(dTheta>2)) stop("dTheta values exceeding 2 not yet supported.")#
+#
+   mVec <- dtheta/dTheta#
+   if (any(!is.wholenumber(mVec)))#
+       stop("mVec is not a vector of integers.")
+is.wholenumber <- function(x,tol=sqrt(.Machine$double.eps))#
+      return(abs(x-round(x))<tol)
+dTheta <- rep(NA,L)#
+#
+   if (is.null(mutheta)|is.null(Sigmatheta))#
+      dtheta0 <- 0#
+#
+   if ((!is.null(mutheta))&(!is.null(Sigmatheta)))#
+     dtheta0 <- length(mutheta)#
+#
+   for (ell in 1:L)#
+      dTheta[ell] <- sqrt(length(etaIN[[2*ell+1]][-1]))#
+#
+   if (any(dTheta>2)) stop("dTheta values exceeding 2 not yet supported.")#
+#
+   mVec <- dtheta/dTheta#
+   if (any(!is.wholenumber(mVec)))#
+       stop("mVec is not a vector of integers.")
+etaSUM[[1]] <- etaIN[[1]] + etaIN[[2]]  #
+   for (ell in 1:L)#
+      etaSUM[[ell+1]] <-  etaIN[[2*ell+1]] + etaIN[[2*ell+2]]
+pt1 <- NULL#
+   tmpMat <- matrix(0,(dtheta0+sum(dTheta*mVec)),(dtheta0+sum(dTheta*mVec)))#
+   if (dtheta0>0)#
+   {#
+      pt1 <- solve(Sigmatheta,mutheta)#
+      tmpMat[1:dtheta0,1:dtheta0] <- solve(Sigmatheta)#
+   }
+pt1 <- c(pt1,rep(0,sum(dtheta)))
+indStt <- dtheta0 + 1#
+   for (ell in 1:L)#
+   {#
+#
+     indEnd <- indStt+dTheta[ell]*mVec[ell] - 1#
+     indsCurr <- indStt:indEnd#
+#
+      etaCurr <- etaSUM[[ell+1]]#
+      OmegaCurr <- (etaCurr[1] + 0.5*(dTheta[ell]+1))*solve(vecInverse(etaCurr[-1]))#
+      if (dTheta[ell]==1)#
+         tmpMat[indsCurr,indsCurr] <- as.numeric(OmegaCurr)*diag(mVec[ell])#
+#
+      if (dTheta[ell]==2)#
+         tmpMat[indsCurr,indsCurr] <- kronecker(diag(mVec[ell]),OmegaCurr)#
+      indStt <- indStt + dtheta[ell]#
+#
+   }
+pt2 <- -0.5*vec(tmpMat)
+etaOUT[[1]] <- c(pt1,pt2)
+aVec <- etaSUM[[1]]
+ncC <- (sqrt(4*length(aVec) + 1) - 1)/2
+a1 <- aVec[1:ncC]
+a2 <- aVec[(ncC+1):(ncC*(ncC+1))]
+vecinva2 <- vecInverse(a2)
+XiMat <- 0.25*solve(vecinva2,(t(solve(vecinva2,tcrossprod(a1)))-2*diag(ncC)))
+ncC
+K
+indStt <- dtheta0 + 1#
+   for (ell in 1:L)#
+   {#
+      indEnd <- indStt + dtheta[ell] - 1#
+      indsCurr <- indStt:indEnd#
+#
+      if (dTheta[ell]==1)#
+          etaOUT[[ell+1]] <-  -0.5*c(mVec[ell],sum(diag(XiMat[indsCurr,indsCurr])))#
+      if (dTheta[ell]==2)#
+      {#
+         indMat <- vector("list",4)#
+         oddInds <- seq(indStt,(indEnd-1),by=2)#
+         eveInds <- oddInds + 1#
+         indMat[[1]] <- cbind(oddInds,oddInds)#
+         indMat[[2]] <- cbind(eveInds,oddInds)#
+         indMat[[3]] <- cbind(oddInds,eveInds)#
+         indMat[[4]] <- cbind(eveInds,eveInds)#
+#
+         vecTMP <- NULL#
+         for (i in 1:4)#
+             vecTMP <- c(vecTMP,sum(XiMat[indMat[[i]]]))#
+#
+         etaOUT[[ell+1]] <- -0.5*c(mVec[ell],vecTMP)#
+      }#
+      indStt <- indStt + dtheta[ell] #
+   }
+ell
+indStt
+indEnd
+indsCurr
+dtheta
+dTheta
+gauss_pen_fragment <- updateGaussPenFrag(mutheta=rep(0,2),Sigmatheta=sigsq_beta*diag(2),#
+                                   dtheta = K, etaIN = eta_in)
+gauss_pen_fragment
+eta$"p(beta,u|sigsq_u)->sigsq_u" <- gauss_pen_fragment[[2]]
+eta$"p(beta,u|sigsq_u)->sigsq_u"
+source("logistic_sp_regn_vmp.R")
+library(MASS)#
+library(magic)#
+library(lattice)#
+library(pracma)#
+library(ellipse)#
+#
+# Required functions:#
+#
+setwd("functions")#
+#
+source("X_design.r")#
+source("ZOSull.r")#
+source("OmegaOSull.r")#
+source("vec.r")#
+source("vecInverse.r")#
+source("tr.r")#
+source("trapint.r")#
+source("cprod.r")#
+source("wait.r")#
+source("vmp_functions.r")#
+source("fpca_algs.r")#
+source("updateGaussPenFrag.r")#
+#
+setwd("..")#
+#
+set.seed(6)#
+#
+# Settings:#
+#
+n <- 300#
+n_vmp <- 100#
+n_int_knots <- 23#
+K <- n_int_knots + 2#
+D_nu <- duplication.matrix(K + 2)#
+n_g <- 1000#
+#
+f <- function(x) {#
+	ans <- (sin(2*pi*x) + 0.5)/4#
+	return(ans)#
+}#
+#
+x <- runif(n)#
+prob_vec <- f(x)
+prob_vec
+y <- rbinom(n, 1, prob_vec)
+x_g <- s
+x_g <- seq(0, 1, length = n_g)
+f <- function(x) {#
+	ans <- (sin(2*pi*x) + 0.5)/4#
+	return(ans)#
+}#
+#
+x_g <- seq(0, 1, length = n_g)#
+f_g <- f(x_g)#
+plot(x_g, f_g, type = "l")
+f <- function(x) {#
+	ans <- (sin(2*pi*x) + 1)/4#
+	return(ans)#
+}#
+#
+x_g <- seq(0, 1, length = n_g)#
+f_g <- f(x_g)#
+plot(x_g, f_g, type = "l")
+f <- function(x) {#
+	ans <- (sin(2*pi*x) + 2)/4#
+	return(ans)#
+}#
+#
+x_g <- seq(0, 1, length = n_g)#
+f_g <- f(x_g)#
+plot(x_g, f_g, type = "l")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
+source("logistic_sp_regn_vmp.R")
